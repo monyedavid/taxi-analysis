@@ -20,7 +20,7 @@ object Analysis_jan_25_2018 extends App {
 		.csv(constants.localResourceData + "taxi_zones.csv")
 
 	/**
-	  * Questions: <br/>
+	  * [Enquiries]: <br/>
 	  *
 	  * 1. Which zones have the most pickups/dropoffs overall?<br/>
 	  * 2. What are the peak hours for taxi?<br/>
@@ -455,15 +455,65 @@ object Analysis_jan_25_2018 extends App {
 	  * - fewer emissions - can ask for subsidy on the project
 	  */
 
+	val groupedAttempts5MinWindowDF = taxiDF. // same as "groupedAttempts5MinRangeDF" but with window function; improved accuracy in ride share grouping
+		select(
+			$"PULocationID", $"total_amount", $"tpep_pickup_datetime"
+		)
+		.where(col("passenger_count") < 3) // => passenger limit \\ can only use ride share on cab rides with @most 2 passengers
+		.groupBy(window($"tpep_pickup_datetime", "5 minute").as("fiveMinWindow"), $"PULocationID")
+		.agg(
+			count("*").as("total_trips"),
+			sum(col("total_amount")).as("total_amount")
+		)
+		.withColumn(
+			"window-start", col("fiveMinWindow").getField("start")
+		)
+		.withColumn(
+			"window-end", col("fiveMinWindow").getField("end")
+		)
+		.drop("fiveMinWindow")
+		.join(taxiZonesDF, col("PULocationID") === col("LocationID"))
+		.drop("LocationID", "service_zone")
+		.orderBy(col("total_trips").desc_nulls_last)
 
 	/**
-	  * [model for estimating potential economic impact over the dataset]
+	  * groupedAttempts5MinWindowDF.show(false)
 	  *
-	  * 5% of taxi trips detected to be group-able @any time
-	  * 30% of people actually accept to be grouped
-	  * 5$ discount on grouped rides
-	  * $2 extra to take an individual ride
-	  * if 2 rides are grouped, reducing cost(maintenance, etc.) by 60% of one average ride \\ avgCostReduction
+	  * +------------+-----------+------------------+-------------------+-------------------+---------+---------------------+
+	  * |PULocationID|total_trips|total_amount      |window-start       |window-end         |Borough  |Zone                 |
+	  * +------------+-----------+------------------+-------------------+-------------------+---------+---------------------+
+	  * |142         |116        |1597.109999999998 |2018-01-25 21:05:00|2018-01-25 21:10:00|Manhattan|Lincoln Square East  |
+	  * |237         |108        |1289.9199999999992|2018-01-25 14:15:00|2018-01-25 14:20:00|Manhattan|Upper East Side South|
+	  * |236         |106        |1230.7999999999984|2018-01-25 14:20:00|2018-01-25 14:25:00|Manhattan|Upper East Side North|
+	  * |236         |104        |1188.999999999999 |2018-01-25 07:00:00|2018-01-25 07:05:00|Manhattan|Upper East Side North|
+	  * |236         |104        |1263.099999999999 |2018-01-25 07:05:00|2018-01-25 07:10:00|Manhattan|Upper East Side North|
+	  * |236         |104        |1134.4999999999986|2018-01-25 14:05:00|2018-01-25 14:10:00|Manhattan|Upper East Side North|
+	  * |142         |103        |1467.8599999999988|2018-01-25 20:35:00|2018-01-25 20:40:00|Manhattan|Lincoln Square East  |
+	  * |237         |102        |1269.5199999999993|2018-01-25 17:10:00|2018-01-25 17:15:00|Manhattan|Upper East Side South|
+	  * |161         |101        |1515.7399999999989|2018-01-25 19:30:00|2018-01-25 19:35:00|Manhattan|Midtown Center       |
+	  * |237         |100        |1061.2699999999988|2018-01-25 13:35:00|2018-01-25 13:40:00|Manhattan|Upper East Side South|
+	  * |237         |100        |1256.9099999999994|2018-01-25 18:15:00|2018-01-25 18:20:00|Manhattan|Upper East Side South|
+	  * |236         |99         |1339.799999999999 |2018-01-25 15:05:00|2018-01-25 15:10:00|Manhattan|Upper East Side North|
+	  * |161         |99         |1345.8599999999983|2018-01-25 18:40:00|2018-01-25 18:45:00|Manhattan|Midtown Center       |
+	  * |162         |99         |1483.0099999999984|2018-01-25 20:20:00|2018-01-25 20:25:00|Manhattan|Midtown East         |
+	  * |236         |98         |1098.359999999999 |2018-01-25 14:00:00|2018-01-25 14:05:00|Manhattan|Upper East Side North|
+	  * |237         |97         |1167.829999999999 |2018-01-25 17:00:00|2018-01-25 17:05:00|Manhattan|Upper East Side South|
+	  * |161         |96         |1530.359999999999 |2018-01-25 18:45:00|2018-01-25 18:50:00|Manhattan|Midtown Center       |
+	  * |237         |96         |1212.489999999999 |2018-01-25 18:00:00|2018-01-25 18:05:00|Manhattan|Upper East Side South|
+	  * |237         |95         |1073.869999999999 |2018-01-25 17:25:00|2018-01-25 17:30:00|Manhattan|Upper East Side South|
+	  * |161         |95         |1360.4499999999991|2018-01-25 14:20:00|2018-01-25 14:25:00|Manhattan|Midtown Center       |
+	  * +------------+-----------+------------------+-------------------+-------------------+---------+---------------------+
+	  */
+
+
+	/**
+	  * [model for estimating potential economic impact over the dataset]<br />
+	  *
+	  * 5% of taxi trips detected to be group-able @any time<br />
+	  * 30% of people actually accept to be grouped<br />
+	  * 5$ discount on grouped rides<br />
+	  * $2 extra to take an individual ride<br />
+	  * if 2 rides are grouped, reducing cost(maintenance, etc.) by 60% of one average ride \\ avgCostReduction<br />
 	  */
 	val percentGroupAttempt = 0.05 // 5% of taxi trips detected to be group-able @any time
 	val percentAcceptGrouping = 0.3 // 30% of people actually accept to be grouped
@@ -538,6 +588,112 @@ object Analysis_jan_25_2018 extends App {
 	  * +-----------------+
 	  *
 	  * |=> ~ 40k$/day -> 12 million/year
+	  */
+
+	/**
+	  * 9. Estimate peak demand, in range of time of day | approximation of where&when taxis should be available on sight in %
+	  */
+
+	val totalTripsCount = taxiDF.select(count("*")).take(1)(0)
+	println(s"totalTripsCount: $totalTripsCount") // 331893
+
+	def peakDemandInZones(windowDuration: String): Dataset[Row] = taxiDF.select( // windowDuration => 1 hour, 2 hour ..
+		$"PULocationID", $"tpep_pickup_datetime"
+	).groupBy(window($"tpep_pickup_datetime", windowDuration).as("peak-range"), $"PULocationID")
+		.agg(count("*").as("total_trips"))
+		.join(taxiZonesDF, col("PULocationID") === col("LocationID"))
+		.drop("LocationID", "service_zone")
+		.orderBy($"total_trips".desc_nulls_last, $"Borough")
+
+	val peakDemandInZonesDF_2Hour = peakDemandInZones("2 hour")
+
+	/**
+	  * peakDemandInZonesDF_2Hour.show(false)
+	  * +------------------------------------------+------------+-----------+---------+-------------------------+
+	  * |peak-range                                |PULocationID|total_trips|Borough  |Zone                     |
+	  * +------------------------------------------+------------+-----------+---------+-------------------------+
+	  * |[2018-01-25 17:00:00, 2018-01-25 19:00:00]|237         |2301       |Manhattan|Upper East Side South    |
+	  * |[2018-01-25 13:00:00, 2018-01-25 15:00:00]|237         |2210       |Manhattan|Upper East Side South    |
+	  * |[2018-01-25 19:00:00, 2018-01-25 21:00:00]|162         |2090       |Manhattan|Midtown East             |
+	  * |[2018-01-25 17:00:00, 2018-01-25 19:00:00]|162         |2083       |Manhattan|Midtown East             |
+	  * |[2018-01-25 13:00:00, 2018-01-25 15:00:00]|161         |2056       |Manhattan|Midtown Center           |
+	  * |[2018-01-25 13:00:00, 2018-01-25 15:00:00]|236         |2011       |Manhattan|Upper East Side North    |
+	  * |[2018-01-25 15:00:00, 2018-01-25 17:00:00]|236         |2010       |Manhattan|Upper East Side North    |
+	  * |[2018-01-25 19:00:00, 2018-01-25 21:00:00]|161         |2008       |Manhattan|Midtown Center           |
+	  * |[2018-01-25 15:00:00, 2018-01-25 17:00:00]|237         |1982       |Manhattan|Upper East Side South    |
+	  * |[2018-01-25 07:00:00, 2018-01-25 09:00:00]|236         |1960       |Manhattan|Upper East Side North    |
+	  * |[2018-01-25 17:00:00, 2018-01-25 19:00:00]|161         |1936       |Manhattan|Midtown Center           |
+	  * |[2018-01-25 19:00:00, 2018-01-25 21:00:00]|237         |1857       |Manhattan|Upper East Side South    |
+	  * |[2018-01-25 17:00:00, 2018-01-25 19:00:00]|234         |1855       |Manhattan|Union Sq                 |
+	  * |[2018-01-25 11:00:00, 2018-01-25 13:00:00]|161         |1826       |Manhattan|Midtown Center           |
+	  * |[2018-01-25 11:00:00, 2018-01-25 13:00:00]|237         |1822       |Manhattan|Upper East Side South    |
+	  * |[2018-01-25 07:00:00, 2018-01-25 09:00:00]|237         |1816       |Manhattan|Upper East Side South    |
+	  * |[2018-01-25 19:00:00, 2018-01-25 21:00:00]|234         |1773       |Manhattan|Union Sq                 |
+	  * |[2018-01-25 19:00:00, 2018-01-25 21:00:00]|230         |1749       |Manhattan|Times Sq/Theatre District|
+	  * |[2018-01-25 17:00:00, 2018-01-25 19:00:00]|236         |1741       |Manhattan|Upper East Side North    |
+	  * |[2018-01-25 15:00:00, 2018-01-25 17:00:00]|161         |1694       |Manhattan|Midtown Center           |
+	  * +------------------------------------------+------------+-----------+---------+-------------------------+
+	  */
+
+	val peakDemandInZonesDF_3Hour = peakDemandInZones("3 hour")
+
+	/**
+	  * peakDemandInZonesDF_3Hour.show(false)
+	  * +------------------------------------------+------------+-----------+---------+-------------------------+
+	  * |peak-range                                |PULocationID|total_trips|Borough  |Zone                     |
+	  * +------------------------------------------+------------+-----------+---------+-------------------------+
+	  * |[2018-01-25 16:00:00, 2018-01-25 19:00:00]|237         |3327       |Manhattan|Upper East Side South    |
+	  * |[2018-01-25 13:00:00, 2018-01-25 16:00:00]|237         |3166       |Manhattan|Upper East Side South    |
+	  * |[2018-01-25 13:00:00, 2018-01-25 16:00:00]|236         |3010       |Manhattan|Upper East Side North    |
+	  * |[2018-01-25 19:00:00, 2018-01-25 22:00:00]|161         |2986       |Manhattan|Midtown Center           |
+	  * |[2018-01-25 19:00:00, 2018-01-25 22:00:00]|162         |2979       |Manhattan|Midtown East             |
+	  * |[2018-01-25 16:00:00, 2018-01-25 19:00:00]|162         |2972       |Manhattan|Midtown East             |
+	  * |[2018-01-25 13:00:00, 2018-01-25 16:00:00]|161         |2908       |Manhattan|Midtown Center           |
+	  * |[2018-01-25 16:00:00, 2018-01-25 19:00:00]|161         |2778       |Manhattan|Midtown Center           |
+	  * |[2018-01-25 16:00:00, 2018-01-25 19:00:00]|236         |2752       |Manhattan|Upper East Side North    |
+	  * |[2018-01-25 07:00:00, 2018-01-25 10:00:00]|236         |2722       |Manhattan|Upper East Side North    |
+	  * |[2018-01-25 10:00:00, 2018-01-25 13:00:00]|237         |2714       |Manhattan|Upper East Side South    |
+	  * |[2018-01-25 10:00:00, 2018-01-25 13:00:00]|161         |2613       |Manhattan|Midtown Center           |
+	  * |[2018-01-25 07:00:00, 2018-01-25 10:00:00]|237         |2563       |Manhattan|Upper East Side South    |
+	  * |[2018-01-25 16:00:00, 2018-01-25 19:00:00]|234         |2549       |Manhattan|Union Sq                 |
+	  * |[2018-01-25 19:00:00, 2018-01-25 22:00:00]|230         |2518       |Manhattan|Times Sq/Theatre District|
+	  * |[2018-01-25 19:00:00, 2018-01-25 22:00:00]|237         |2501       |Manhattan|Upper East Side South    |
+	  * |[2018-01-25 19:00:00, 2018-01-25 22:00:00]|234         |2450       |Manhattan|Union Sq                 |
+	  * |[2018-01-25 10:00:00, 2018-01-25 13:00:00]|236         |2394       |Manhattan|Upper East Side North    |
+	  * |[2018-01-25 19:00:00, 2018-01-25 22:00:00]|48          |2317       |Manhattan|Clinton East             |
+	  * |[2018-01-25 16:00:00, 2018-01-25 19:00:00]|230         |2255       |Manhattan|Times Sq/Theatre District|
+	  * +------------------------------------------+------------+-----------+---------+-------------------------+
+	  */
+
+	val peakDemandInZonesDF_4Hour = peakDemandInZones("4 hour")
+
+
+	/**
+	  * peakDemandInZonesDF_4Hour.show(false)
+	  * +------------------------------------------+------------+-----------+---------+----------------------------+
+	  * |peak-range                                |PULocationID|total_trips|Borough  |Zone                        |
+	  * +------------------------------------------+------------+-----------+---------+----------------------------+
+	  * |[2018-01-25 13:00:00, 2018-01-25 17:00:00]|237         |4192       |Manhattan|Upper East Side South       |
+	  * |[2018-01-25 17:00:00, 2018-01-25 21:00:00]|162         |4173       |Manhattan|Midtown East                |
+	  * |[2018-01-25 17:00:00, 2018-01-25 21:00:00]|237         |4158       |Manhattan|Upper East Side South       |
+	  * |[2018-01-25 13:00:00, 2018-01-25 17:00:00]|236         |4021       |Manhattan|Upper East Side North       |
+	  * |[2018-01-25 17:00:00, 2018-01-25 21:00:00]|161         |3944       |Manhattan|Midtown Center              |
+	  * |[2018-01-25 13:00:00, 2018-01-25 17:00:00]|161         |3750       |Manhattan|Midtown Center              |
+	  * |[2018-01-25 17:00:00, 2018-01-25 21:00:00]|234         |3628       |Manhattan|Union Sq                    |
+	  * |[2018-01-25 09:00:00, 2018-01-25 13:00:00]|237         |3461       |Manhattan|Upper East Side South       |
+	  * |[2018-01-25 17:00:00, 2018-01-25 21:00:00]|230         |3333       |Manhattan|Times Sq/Theatre District   |
+	  * |[2018-01-25 09:00:00, 2018-01-25 13:00:00]|161         |3297       |Manhattan|Midtown Center              |
+	  * |[2018-01-25 09:00:00, 2018-01-25 13:00:00]|236         |3156       |Manhattan|Upper East Side North       |
+	  * |[2018-01-25 05:00:00, 2018-01-25 09:00:00]|236         |3139       |Manhattan|Upper East Side North       |
+	  * |[2018-01-25 13:00:00, 2018-01-25 17:00:00]|162         |2921       |Manhattan|Midtown East                |
+	  * |[2018-01-25 17:00:00, 2018-01-25 21:00:00]|170         |2912       |Manhattan|Murray Hill                 |
+	  * |[2018-01-25 17:00:00, 2018-01-25 21:00:00]|163         |2892       |Manhattan|Midtown North               |
+	  * |[2018-01-25 17:00:00, 2018-01-25 21:00:00]|236         |2804       |Manhattan|Upper East Side North       |
+	  * |[2018-01-25 05:00:00, 2018-01-25 09:00:00]|237         |2795       |Manhattan|Upper East Side South       |
+	  * |[2018-01-25 17:00:00, 2018-01-25 21:00:00]|142         |2738       |Manhattan|Lincoln Square East         |
+	  * |[2018-01-25 05:00:00, 2018-01-25 09:00:00]|186         |2666       |Manhattan|Penn Station/Madison Sq West|
+	  * |[2018-01-25 17:00:00, 2018-01-25 21:00:00]|138         |2660       |Queens   |LaGuardia Airport           |
+	  * +------------------------------------------+------------+-----------+---------+----------------------------+
 	  */
 
 

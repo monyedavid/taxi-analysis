@@ -64,12 +64,12 @@ root
 - estimate time of day for peak-demands in all zones | approximation of where&when taxis should be available on sight in
   %
 
-[Source](src/main/scala/taxi/Analysis.scala)
+[Source](src/main/scala/taxi/Analysis_jan_25_2018.scala)
 
 # Economic impact of grouped taxi rides
 
-A simple model for estimating potential economic impact over the grouped taxi ride dataset
-The goal is to estimate "economic impart" \\ profits from accepted & rejected group rides using the parameters below
+- A simple model for estimating potential economic impact over the grouped taxi ride dataset
+- The goal is to estimate "economic impart" \\ profits from accepted & rejected group rides using the parameters below
 
 ```text
 [parameters]
