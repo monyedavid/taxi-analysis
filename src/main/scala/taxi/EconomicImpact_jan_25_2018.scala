@@ -20,7 +20,7 @@ object EconomicImpact_jan_25_2018 {
 
 		import spark.implicits._
 
-		// minimized version (1 Day) of nyc taxi rides
+		// minimized version jan_25_2018  of nyc taxi rides
 		val taxiDF = spark.read.load(args(0))
 
 		val taxiZonesDF = spark.read
